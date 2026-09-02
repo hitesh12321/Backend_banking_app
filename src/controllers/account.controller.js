@@ -51,4 +51,4 @@ async function getuserAccountsBalanceController(req , res){
 
 
 
-module.exports = {createAccountController , getuserAccountsController , getuserAccountsBalanceController};
+module.exports = {createAccountController , getuserAccountsController , getuserAccountsBalanceController };

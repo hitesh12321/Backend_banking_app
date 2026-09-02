@@ -1,9 +1,10 @@
 const jwt = require("jsonwebtoken");
 const userModel = require("../models/user.model");
+const tokenBlackListModel = require("../models/blacklist.model");
 const authMiddleware = async (req , res , next)=>{
 
-    try{
-        const authHeader = req.headers.authorization;
+
+        const authHeader =  req.cookies.token || req.headers.authorization?.split(" ")[1];
         if(!authHeader){
             return res.status(401).json({
                 message :"Authorization token required"
@@ -16,6 +17,14 @@ const authMiddleware = async (req , res , next)=>{
             });
         }
 
+        const isblacklisted = await tokenBlackListModel.findOne({token});
+
+        if(isblacklisted){
+            return res.status(400).json({
+                message :"Unauthorized access , token in not valid "
+            });
+        }
+        try{
         const decoded = jwt.verify(token , process.env.JWT_SECRET);
         const user = await userModel.findById(decoded.userId);
 
@@ -41,8 +50,7 @@ const authMiddleware = async (req , res , next)=>{
 
 const systemUserAuthMiddleware = async (req , res, next)=>{
 
-       try{
-        const authHeader = req.headers.authorization;
+        const authHeader = req.cookies.token || req.headers.authorization?.split(" ")[1];
         if(!authHeader){
             return res.status(401).json({
                 message :"Authorization token required"
@@ -55,6 +63,14 @@ const systemUserAuthMiddleware = async (req , res, next)=>{
             });
         }
 
+        const isblacklisted = await tokenBlackListModel.findOne({token});
+
+        if(isblacklisted){
+            return res.status(400).json({
+                message :"Unauthorized access , token in not valid "
+            });
+        }
+  try{
         const decoded = jwt.verify(token , process.env.JWT_SECRET);
         const user = await userModel.findById(decoded.userId).select("+systemUser");
 

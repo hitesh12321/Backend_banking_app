@@ -13,6 +13,10 @@ const authRouter = require("./routes/auth.routes"); // auth wala oruter
 const accountRouter = require("./routes/account.routes");
 const transactionRouter = require("./routes/transition.route");
 
+app.get('/', (req, res) => {
+    res.send('Welcome to the Backend Banking App API!');
+});
+
 app.use(cookieParser());
 app.use(express.json());
 app.use("/api/auth" , authRouter);

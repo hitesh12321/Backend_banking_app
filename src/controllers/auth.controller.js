@@ -91,7 +91,6 @@ async function userLoginController(req , res){
     }  );
 
 
-await emailService.sendRegitrationEmail(user.email ,user.name );
 
 }
 

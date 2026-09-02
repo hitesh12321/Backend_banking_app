@@ -33,7 +33,14 @@ const sendRegitrationEmail = async (email , name)=>{
     await sendEmail(email , "Registration Successfull!!" , `Hello ${name}, Your account has been created successfully.`);
 }
 
+const sendTransactionEmail = async (userEmail , name , amount , toAccount)=>{
+    await sendEmail(userEmail , "Payment Successfull!!" , `Hello ${name}, Your payment has been successfull. to account ${toAccount} of ${amount}rs`);
+}
+
+const sendTransactionFailureEmail = async (userEmail , name , amount , toAccount)=>{
+    await sendEmail(userEmail , "Payment FAILED!!" , `Hello ${name}, Your payment has been FAILED. to account ${toAccount} of ${amount}rs`);
+}
 
 
 
-module.exports = {sendRegitrationEmail , sendEmail};
+module.exports = {sendRegitrationEmail , sendEmail ,sendTransactionEmail , sendTransactionFailureEmail };

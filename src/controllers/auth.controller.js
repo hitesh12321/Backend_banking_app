@@ -1,7 +1,7 @@
 const userModel = require("../models/user.model");
 const jwt = require("jsonwebtoken");
 const emailService = require("../services/email.service");
-const tokenBlackListModel = require("../models/blacklist.model");
+const { tokenBlackListModel } = require("../models/blacklist.model");
 // user register controller // Post - /api/auth/register
 // controllers are mailny functions which is the bussines layer i can say 
 async function userRegisterController(req , res){

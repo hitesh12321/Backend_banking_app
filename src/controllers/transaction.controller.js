@@ -117,67 +117,59 @@ async function createTransaction(req, res) {
     let transaction;
 
     try {
-            /// NOW 
-    // ACID 
-    /** 
-     * 
-    * 5. Create transaction (PENDING)
-6. Create DEBIT ledger entry
-* 7. Create CREDIT ledger entry
-* 8. Mark transaction COMPLETED
-*/ // ya to sare ya ek bhi na ho - ATOMICITY
-    //5. create transactions (PENDING)
+        // 5. Create transaction (PENDING) OUTSIDE the session to act as a lock
+        transaction = new transactionModel({
+            fromAccount,
+            toAccount,
+            amount,
+            idempotencyKey,
+            status: "PENDING"
+        });
+        await transaction.save(); // This saves it to DB so retries will see "PENDING"
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        
+        try {
+            // 6. Create DEBIT ledger entry
+            await ledgerModel.create([{
+                account: fromAccount,
+                amount: amount,
+                transaction: transaction._id,
+                type: "DEBIT"
+            }], { session });
 
-     transaction = new transactionModel({
-        fromAccount,
-        toAccount,
-        amount,
-        idempotencyKey,
-        status: "PENDING"
-    });
+            // 7. Create CREDIT ledger entry
+            await ledgerModel.create([{
+                account: toAccount,
+                amount: amount,
+                transaction: transaction._id,
+                type: "CREDIT"
+            }], { session });
 
+            // 8. Mark transaction COMPLETED
+            transaction.status = "COMPLETED";
+            await transaction.save({ session });
 
-    //6. Create DEBIT ledger entry
-    const debitLedgerEntry = await ledgerModel.create([{
-        account: fromAccount,
-        amount: amount,
-        transaction: transaction._id,
-        type: "DEBIT"
-    }], { session });
+            // 9. Commit MongoDB session
+            await session.commitTransaction();
+            session.endSession();
+        } catch (innerError) {
+            await session.abortTransaction();
+            session.endSession();
+            
+            // Mark transaction as FAILED if something went wrong inside the session
+            transaction.status = "FAILED";
+            await transaction.save();
+            throw innerError;
+        }
 
-        await (()=>{
-        return new Promise((resolve)=> setTimeout(resolve, 100*1000));
-    })();
-
-    //* 7. Create CREDIT ledger entry
-    const creditLedgerEntry = await ledgerModel.create([{
-        account: toAccount,
-        amount: amount,
-        transaction: transaction._id,
-        type: "CREDIT"
-    }], { session });
-
-
-    //* 8. Mark transaction COMPLETED
-    // transaction.status = "COMPLETED";
-    // await transaction.save({ session });
-
-    await transactionModel.findOneAndUpdate(
-        {_id : transaction._id},
-        {status :"COMPLETED"},
-        {session}
-    );
-
-
-    //* 9. Commit MongoDB session
-    await session.commitTransaction();
-    session.endSession();
     } catch (error) {
+        if (error.code === 11000) {
+            return res.status(409).json({ message: "Payment is already processing" });
+        }
         return res.status(400).json({
-            message : "Transaction is in process or pending due to some issue please wait."
+            message: "Transaction failed due to an issue."
         });
     }
 

@@ -1,36 +1,33 @@
 const jwt = require("jsonwebtoken");
 const userModel = require("../models/user.model");
-const tokenBlackListModel = require("../models/blacklist.model");
-const authMiddleware = async (req , res , next)=>{
+const { tokenBlackListModel } = require("../models/blacklist.model");
 
+const authMiddleware = async (req, res, next) => {
+    let token = req.cookies.token;
+    if (!token && req.headers.authorization && req.headers.authorization.startsWith("Bearer ")) {
+        token = req.headers.authorization.split(" ")[1];
+    }
 
-        const authHeader =  req.cookies.token || req.headers.authorization?.split(" ")[1];
-        if(!authHeader){
-            return res.status(401).json({
-                message :"Authorization token required"
-            });
-        }
-        const token = authHeader.split(" ")[1];
-        if(!token){
-            return res.status(401).json({
-                message : "Invalid Authorization Format"
-            });
-        }
+    if (!token) {
+        return res.status(401).json({
+            message: "Authorization token required or invalid format"
+        });
+    }
 
-        const isblacklisted = await tokenBlackListModel.findOne({token});
+    const isblacklisted = await tokenBlackListModel.findOne({ token });
 
-        if(isblacklisted){
-            return res.status(400).json({
-                message :"Unauthorized access , token in not valid "
-            });
-        }
-        try{
-        const decoded = jwt.verify(token , process.env.JWT_SECRET);
+    if (isblacklisted) {
+        return res.status(400).json({
+            message: "Unauthorized access , token in not valid "
+        });
+    }
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const user = await userModel.findById(decoded.userId);
 
-        if(!user){
+        if (!user) {
             return res.status(401).json({
-                message : "User no longer exists"
+                message: "User no longer exists"
             });
         }
 
@@ -38,7 +35,7 @@ const authMiddleware = async (req , res , next)=>{
         next();
 
 
-    }catch{
+    } catch {
         return res.status(401).json({
 
             message: "invalid or expired token"
@@ -48,41 +45,38 @@ const authMiddleware = async (req , res , next)=>{
 
 }
 
-const systemUserAuthMiddleware = async (req , res, next)=>{
+const systemUserAuthMiddleware = async (req, res, next) => {
+    let token = req.cookies.token;
+    if (!token && req.headers.authorization && req.headers.authorization.startsWith("Bearer ")) {
+        token = req.headers.authorization.split(" ")[1];
+    }
 
-        const authHeader = req.cookies.token || req.headers.authorization?.split(" ")[1];
-        if(!authHeader){
-            return res.status(401).json({
-                message :"Authorization token required"
-            });
-        }
-        const token = authHeader.split(" ")[1];
-        if(!token){
-            return res.status(401).json({
-                message : "Invalid Authorization Format"
-            });
-        }
+    if (!token) {
+        return res.status(401).json({
+            message: "Authorization token required or invalid format"
+        });
+    }
 
-        const isblacklisted = await tokenBlackListModel.findOne({token});
+    const isblacklisted = await tokenBlackListModel.findOne({ token });
 
-        if(isblacklisted){
-            return res.status(400).json({
-                message :"Unauthorized access , token in not valid "
-            });
-        }
-  try{
-        const decoded = jwt.verify(token , process.env.JWT_SECRET);
+    if (isblacklisted) {
+        return res.status(400).json({
+            message: "Unauthorized access , token in not valid "
+        });
+    }
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const user = await userModel.findById(decoded.userId).select("+systemUser");
 
-        if(!user){
+        if (!user) {
             return res.status(401).json({
-                message : "User no longer exists"
+                message: "User no longer exists"
             });
         }
 
-        if(!user.systemUser){
+        if (!user.systemUser) {
             return res.status(403).json({
-                message : "Forbidden access , not a system user "
+                message: "Forbidden access , not a system user "
             });
         }
 
@@ -90,7 +84,7 @@ const systemUserAuthMiddleware = async (req , res, next)=>{
         next();
 
 
-    }catch(err){
+    } catch (err) {
         console.log("systemUserAuthMiddleware error =>", err.name, ":", err.message);
         return res.status(401).json({
 
@@ -101,4 +95,4 @@ const systemUserAuthMiddleware = async (req , res, next)=>{
 
 }
 
-module.exports = {authMiddleware ,systemUserAuthMiddleware };
+module.exports = { authMiddleware, systemUserAuthMiddleware };

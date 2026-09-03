@@ -34,45 +34,61 @@ status: {
 accountSchema.index({user:1 , status : 1});
 
 
-accountSchema.methods.getBalance = async function(){
+accountSchema.methods.getBalance = async function(session) {
 
-    const balanceData = await ledgerModel.aggregate([
-        {$match :{account : this._id}},
-        {$group:{
-            _id:null,
-            totalDebit:{
-                $sum :{
-                    $cond : [{$eq : ["$type" , "DEBIT"]},
-                    "$amount",
-                    0
-                ]
-                }
-            },
-            totalCredit:{
-                $sum :{
-                    $cond : [{$eq : ["$type" , "CREDIT"]},
-                    "$amount",
-                    0
-                ]
+    const aggregation = ledgerModel.aggregate([
+        {
+            $match: {
+                account: this._id
+            }
+        },
+        {
+            $group: {
+                _id: null,
+
+                totalDebit: {
+                    $sum: {
+                        $cond: [
+                            { $eq: ["$type", "DEBIT"] },
+                            "$amount",
+                            0
+                        ]
+                    }
+                },
+
+                totalCredit: {
+                    $sum: {
+                        $cond: [
+                            { $eq: ["$type", "CREDIT"] },
+                            "$amount",
+                            0
+                        ]
+                    }
                 }
             }
-        }},
+        },
         {
-
-            $project :{
-                _id:0,
-                balance:{$subtract :["$totalCredit" , "$totalDebit"]}
+            $project: {
+                _id: 0,
+                balance: {
+                    $subtract: ["$totalCredit", "$totalDebit"]
+                }
             }
         }
+    ]);
 
-    ])
-
-    if(balanceData.length === 0){
-        return 0 ;
+    if (session) {
+        aggregation.session(session);
     }
-    return balanceData[0].balance;
 
-}
+    const balanceData = await aggregation;
+
+    if (balanceData.length === 0) {
+        return 0;
+    }
+
+    return balanceData[0].balance;
+};
 const accountModel = mongoose.model("account" , accountSchema);
 
 

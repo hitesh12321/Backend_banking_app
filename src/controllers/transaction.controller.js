@@ -4,6 +4,7 @@ const ledgerModel = require("../models/ledger.model");
 const emailService = require("../services/email.service");
 const accountModel = require("../models/account.model");
 const mongoose = require("mongoose");
+const redLock = require("../config/redlock");
 
 
 /**
@@ -35,6 +36,28 @@ async function createTransaction(req, res) {
         });
     }
 
+    if (
+    !mongoose.Types.ObjectId.isValid(fromAccount) ||
+    !mongoose.Types.ObjectId.isValid(toAccount)
+) {
+    return res.status(400).json({
+        message: "Invalid account ID"
+    });
+}
+
+
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({
+        message: "Amount must be a positive number"
+    });
+}
+
+    if (fromAccount === toAccount) {
+    return res.status(400).json({
+        message: "Sender and receiver accounts must be different"
+    });
+}
+
     const findFromAccount = await accountModel.findOne({
         _id: fromAccount
     });
@@ -51,6 +74,8 @@ async function createTransaction(req, res) {
             message: "provide a valid receiver account"
         });
     }
+
+
 
     // 2.validate idempotency key 
 
@@ -73,12 +98,12 @@ async function createTransaction(req, res) {
         }
 
         if (isTransactionAlreadyExists.status === "FAILED") {
-            return res.status().json({
+            return res.status(400).json({
                 message: "Payment Failed"
             });
         }
         if (isTransactionAlreadyExists.status === "REVERSED") {
-            return res.status().json({
+            return res.status(400).json({
                 message: "Payment is Reversed , please retry"
             });
         }
@@ -106,18 +131,58 @@ async function createTransaction(req, res) {
 
     // 4 . Derive Sender balance from ledger
 
-    const balance = await findFromAccount.getBalance();
 
-    if (balance < amount) {
-        return res.status(400).json({
-            message: `insuffecient balance in Sender Account , current balance is ${balance} `
-        });
-    }
 
-    let transaction;
+let transaction;
+
+const accountKeys = [
+    `account:${fromAccount}`,
+    `account:${toAccount}`
+].sort();
+
+
+let lock;
+
+
+
+try {
+
+     lock = await redLock.acquire(
+    accountKeys,
+    10000
+);
+    const session = await mongoose.startSession();
 
     try {
-        // 5. Create transaction (PENDING) OUTSIDE the session to act as a lock
+        await session.withTransaction(async () => {
+
+            // yahan transaction ka saara DB work aayega
+            const senderAccount = await accountModel.findOne({
+    _id: fromAccount
+}).session(session);
+
+if (!senderAccount) {
+    throw new Error("SENDER_ACCOUNT_NOT_FOUND");
+}
+
+
+const receiverAccount = await accountModel.findOne({
+  _id: toAccount
+}).session(session);
+
+if (!receiverAccount) {
+  throw new Error("RECEIVER_ACCOUNT_NOT_FOUND");
+}
+
+const balance = await senderAccount.getBalance(session);
+
+
+    if (balance < amount) {
+    throw new Error("INSUFFICIENT_BALANCE");
+}
+
+ // 5. Create transaction (PENDING)
+// Part of the MongoDB transaction
         transaction = new transactionModel({
             fromAccount,
             toAccount,
@@ -125,21 +190,17 @@ async function createTransaction(req, res) {
             idempotencyKey,
             status: "PENDING"
         });
-        await transaction.save(); // This saves it to DB so retries will see "PENDING"
+        await transaction.save({session}); // This saves it to DB so retries will see "PENDING"
 
-        const session = await mongoose.startSession();
-        session.startTransaction();
-        
-        try {
-            // 6. Create DEBIT ledger entry
-            await ledgerModel.create([{
+          await ledgerModel.create([{
                 account: fromAccount,
                 amount: amount,
                 transaction: transaction._id,
                 type: "DEBIT"
             }], { session });
 
-            // 7. Create CREDIT ledger entry
+
+                     // 7. Create CREDIT ledger entry
             await ledgerModel.create([{
                 account: toAccount,
                 amount: amount,
@@ -147,31 +208,108 @@ async function createTransaction(req, res) {
                 type: "CREDIT"
             }], { session });
 
-            // 8. Mark transaction COMPLETED
-            transaction.status = "COMPLETED";
+
+                   transaction.status = "COMPLETED";
             await transaction.save({ session });
 
-            // 9. Commit MongoDB session
-            await session.commitTransaction();
-            session.endSession();
-        } catch (innerError) {
-            await session.abortTransaction();
-            session.endSession();
-            
-            // Mark transaction as FAILED if something went wrong inside the session
-            transaction.status = "FAILED";
-            await transaction.save();
-            throw innerError;
-        }
+   
 
-    } catch (error) {
-        if (error.code === 11000) {
-            return res.status(409).json({ message: "Payment is already processing" });
-        }
-        return res.status(400).json({
-            message: "Transaction failed due to an issue."
+        });
+    } finally {
+        await session.endSession();
+    }
+
+} catch (error) {
+
+    if (error.code === 11000) {
+        return res.status(409).json({
+            message: "Payment is already processing"
         });
     }
+
+    if (error.message === "INSUFFICIENT_BALANCE") {
+        return res.status(400).json({
+            message: `Insufficient balance`
+        });
+    }
+
+    if (error.message === "RECEIVER_ACCOUNT_NOT_FOUND") {
+    return res.status(404).json({
+        message: "Receiver account not found"
+    });
+}
+
+if (error.name === "ExecutionError") {
+    return res.status(423).json({
+        message: "Another transaction is already processing this account. Please retry."
+    });
+}
+if (
+    error.message?.toLowerCase().includes("redis") ||
+    error.message?.toLowerCase().includes("connection")
+) {
+    return res.status(503).json({
+        message: "Transaction service temporarily unavailable. Please retry."
+    });
+}
+    console.error("Transaction error:", error);
+
+    return res.status(400).json({
+        message: "Transaction failed due to an issue."
+    });
+}
+finally {
+  if (lock) {
+        try {
+            await lock.release();
+        } catch (err) {
+            console.error(
+                "Failed to release Redis lock:",
+                err.message
+            );
+        }
+    }
+}
+
+    // try {
+
+
+
+
+
+
+
+     
+
+    //     const session = await mongoose.startSession();
+    //     session.startTransaction();
+        
+    //     try {
+    //         // 6. Create DEBIT ledger entry
+          
+
+   
+
+    //         // 8. Mark transaction COMPLETED
+     
+    //     } catch (innerError) {
+    //         await session.abortTransaction();
+    //         session.endSession();
+            
+    //         // Mark transaction as FAILED if something went wrong inside the session
+    //         transaction.status = "FAILED";
+    //         await transaction.save();
+    //         throw innerError;
+    //     }
+
+    // } catch (error) {
+    //     if (error.code === 11000) {
+    //         return res.status(409).json({ message: "Payment is already processing" });
+    //     }
+    //     return res.status(400).json({
+    //         message: "Transaction failed due to an issue."
+    //     });
+    // }
 
 
 
